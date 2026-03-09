@@ -169,8 +169,8 @@ jobs:
       - name: Clean Build Directories for Windows
         if: contains(matrix.config.goos, 'windows')
         run: |
-          rm -rf app/build
-          rm -rf app/kernel
+          Remove-Item -Recurse -Force app/build -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force app/kernel -ErrorAction SilentlyContinue
         working-directory: ${{ github.workspace }}/repo/siyuan
 
       - name: Building Kernel
