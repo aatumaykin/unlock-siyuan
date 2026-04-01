@@ -208,19 +208,25 @@ jobs:
             Write-Error "Windows artifact not found in $buildDir"
             exit 1
           }
+          Write-Host "Found Windows artifact: $($file.FullName) ($([math]::Round($file.Length/1MB,2)) MB)"
           "path=$($file.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "name=$($file.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Upload Release Asset (Windows)
+      - name: Upload Release Asset (Windows, gh)
         if: contains(matrix.config.goos, 'windows')
-        uses: shogo82148/actions-upload-release-asset@v1
+        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_name: ${{ steps.win_artifact.outputs.name }}
-          asset_path: ${{ steps.win_artifact.outputs.path }}
-          asset_content_type: application/octet-stream
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.event.inputs.version }}"
+          $path = "${{ steps.win_artifact.outputs.path }}"
+          $name = "${{ steps.win_artifact.outputs.name }}"
+          if (-not (Test-Path $path)) {
+            Write-Error "Artifact path not found: $path"
+            exit 1
+          }
+          gh release upload $tag $path --clobber --repo "${{ env.repo_owner }}/${{ env.repo_name }}"
 
       - name: Upload Release Asset (Non-Windows)
         if: "!contains(matrix.config.goos, 'windows')"
