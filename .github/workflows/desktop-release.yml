@@ -197,7 +197,33 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Release Asset
+      - name: Find Windows Artifact
+        if: contains(matrix.config.goos, 'windows')
+        id: win_artifact
+        shell: pwsh
+        run: |
+          $buildDir = Join-Path $env:GITHUB_WORKSPACE "repo\siyuan\app\build"
+          $file = Get-ChildItem -Path $buildDir -Filter "siyuan-*-win.exe" -File | Select-Object -First 1
+          if (-not $file) {
+            Write-Error "Windows artifact not found in $buildDir"
+            exit 1
+          }
+          "path=$($file.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "name=$($file.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload Release Asset (Windows)
+        if: contains(matrix.config.goos, 'windows')
+        uses: shogo82148/actions-upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.get_release.outputs.upload_url }}
+          asset_name: ${{ steps.win_artifact.outputs.name }}
+          asset_path: ${{ steps.win_artifact.outputs.path }}
+          asset_content_type: application/octet-stream
+
+      - name: Upload Release Asset (Non-Windows)
+        if: "!contains(matrix.config.goos, 'windows')"
         uses: shogo82148/actions-upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
