@@ -1,49 +1,66 @@
 name: Release Android
 
+# Builds a patched SiYuan Android APK:
+#   upstream siyuan (tag) → apply patches → gomobile bind → kernel.aar
+#   + mobile UI → app.zip
+#   + siyuan-android (gradle) → assembleOfficialRelease → .apk
+#
+# Manual trigger only: set the upstream tag (e.g. v3.6.5) and pnpm version.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version/tag (e.g. v3.5.8)"
+        description: "Upstream siyuan tag (e.g. v3.6.5)"
         required: true
+        default: "v3.6.5"
       packageManager:
-        description: "pnpm version (e.g. pnpm@10.30.1)"
+        description: "pnpm version (e.g. pnpm@10.33.0)"
         required: true
+        default: "pnpm@10.33.0"
 
 env:
-  repo_owner: EightDoor
-  repo_name: unlock-siyuan
+  UPSTREAM_TAG: ${{ github.event.inputs.version }}
+  # NDK version required by gomobile bind — must match AGP/Go expectations.
+  ANDROID_NDK_VERSION: "27.0.12077973"
 
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Checkout repository
+      # ──────────────────────────────────────────────
+      # 1. Checkout unlock-siyuan (patches only)
+      # ──────────────────────────────────────────────
+      - name: Checkout unlock-siyuan
         uses: actions/checkout@v4
         with:
-          path: repo
+          path: unlock-siyuan
 
-      - name: Clone upstream and apply patches
+      # ──────────────────────────────────────────────
+      # 2. Clone upstream siyuan + apply patches
+      # ──────────────────────────────────────────────
+      - name: Clone upstream siyuan
         run: |
-          cd ${{ github.workspace }}/repo
-          
-          git clone --branch ${{ github.event.inputs.version }} --depth=1 https://github.com/siyuan-note/siyuan.git
-          cd siyuan
-          
-          git apply ${{ github.workspace }}/repo/patches/siyuan/disable-update.patch
-          git apply ${{ github.workspace }}/repo/patches/siyuan/default-config.patch
-          git apply ${{ github.workspace }}/repo/patches/siyuan/mock-vip-user.patch
-          
-          git status
+          git clone --branch ${{ env.UPSTREAM_TAG }} --depth=1 https://github.com/siyuan-note/siyuan.git siyuan
+          echo "SiYuan version: $(jq -r .version siyuan/app/package.json)"
 
+      - name: Apply patches
+        working-directory: ${{ github.workspace }}/siyuan
+        run: |
+          for patch in ${{ github.workspace }}/unlock-siyuan/.patches/*.patch; do
+            echo "Applying $(basename $patch)..."
+            git apply "$patch" && echo "✓ $(basename $patch)" || echo "⚠ skip $(basename $patch) (may not apply)"
+          done
+
+      # ──────────────────────────────────────────────
+      # 3. Toolchain: Go, Node+pnpm, Java 21, Android SDK+NDK
+      # ──────────────────────────────────────────────
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: ${{ github.workspace }}/repo/siyuan/kernel/go.mod
-          cache-dependency-path: "**/*.sum"
+          go-version-file: ${{ github.workspace }}/siyuan/kernel/go.mod
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -57,54 +74,124 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
 
-      - name: Install Node Dependencies
-        run: pnpm install --no-frozen-lockfile
-        working-directory: ${{ github.workspace }}/repo/siyuan/app
-
-      - name: Building UI
-        run: pnpm run build:mobile
-        working-directory: ${{ github.workspace }}/repo/siyuan/app
-
-      - name: Building Kernel
+      - name: Install Android NDK
         run: |
-          cd kernel
-          go mod tidy
-          go build -tags fts5 -v -ldflags "-s -w -X github.com/siyuan-note/siyuan/kernel/util.Mode=prod"
-          mkdir -p ../app/apk/src/main/assets
-          mv kernel ../app/apk/src/main/assets/
-        working-directory: ${{ github.workspace }}/repo/siyuan
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;${{ env.ANDROID_NDK_VERSION }}" || true
+          echo "NDK installed at: $ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}"
+
+      # ──────────────────────────────────────────────
+      # 4. Build mobile UI → app.zip
+      # ──────────────────────────────────────────────
+      - name: Install Node dependencies
+        working-directory: ${{ github.workspace }}/siyuan/app
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build mobile UI
+        working-directory: ${{ github.workspace }}/siyuan/app
+        run: pnpm run build:mobile
+
+      - name: Package app.zip
+        working-directory: ${{ github.workspace }}/siyuan/app
+        run: |
+          zip -r app/src/main/assets/app.zip appearance guide stage changelogs
+          ls -lh app/src/main/assets/app.zip
+
+      # ──────────────────────────────────────────────
+      # 5. Build kernel.aar via gomobile bind
+      # ──────────────────────────────────────────────
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          gomobile init
+
+      - name: Build kernel.aar
+        working-directory: ${{ github.workspace }}/siyuan/kernel
         env:
           GO111MODULE: on
           CGO_ENABLED: 1
-          GOOS: android
-          GOARCH: arm64
-
-      - name: Building APK
+          JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
         run: |
-          cd ${{ github.workspace }}/repo/siyuan/app
-          pnpm run build:apk
+          go mod tidy
+          gomobile bind -tags fts5 -ldflags "-s -w" -v \
+            -o ${{ github.workspace }}/kernel.aar \
+            -target android/arm64 -androidapi 26 \
+            ./mobile/
+          ls -lh ${{ github.workspace }}/kernel.aar
+
+      # ──────────────────────────────────────────────
+      # 6. Clone siyuan-android + assemble APK
+      # ──────────────────────────────────────────────
+      - name: Clone siyuan-android
+        run: |
+          git clone --depth=1 https://github.com/siyuan-note/siyuan-android.git
+          # Extract version from upstream to sync gradle versionName
+          VERSION=$(jq -r .version ${{ github.workspace }}/siyuan/app/package.json)
+          CODE=$(echo "$VERSION" | sed 's/[^0-9]//g' | head -c 3)
+          sed -i "s/siyuanVersionName = .*/siyuanVersionName = \"$VERSION\"/" siyuan-android/build.gradle
+          sed -i "s/siyuanVersionCode = .*/siyuanVersionCode = $CODE/" siyuan-android/build.gradle
+          echo "siyuan-android version: $VERSION (code $CODE)"
+
+      - name: Place kernel.aar and app.zip
+        run: |
+          mkdir -p siyuan-android/app/libs
+          cp ${{ github.workspace }}/kernel.aar siyuan-android/app/libs/kernel.aar
+          cp ${{ github.workspace }}/siyuan/app/app/src/main/assets/app.zip siyuan-android/app/src/main/assets/app.zip
+
+      - name: Generate debug keystore for signing
+        working-directory: ${{ github.workspace }}/siyuan-android/app
+        run: |
+          keytool -genkeypair -v \
+            -keystore siyuan-android.jks \
+            -storepass android -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=SiYuan, OU=Dev, O=Local, L=Local, ST=Local, C=RU"
+          cp signings.templates.gradle signings.gradle
+
+      - name: Assemble release APK
+        working-directory: ${{ github.workspace }}/siyuan-android
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleOfficialRelease --no-daemon --stacktrace
 
-      - name: Get Release
-        id: get_release
-        uses: joutvhu/get-release@v1
+      - name: Collect APK
+        run: |
+          mkdir -p output
+          find siyuan-android/app/build/outputs/apk -name "*.apk" -exec cp {} output/siyuan-${{ env.UPSTREAM_TAG }}-android.apk \;
+          ls -lh output/
+
+      # ──────────────────────────────────────────────
+      # 7. Upload to GitHub Release
+      # ──────────────────────────────────────────────
+      - name: Create or get Release
+        id: release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.version }}
+          tag_name: ${{ env.UPSTREAM_TAG }}
+          name: ${{ env.UPSTREAM_TAG }}
+          files: output/*.apk
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload APK
-        uses: shogo82148/actions-upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_name: siyuan-${{ github.event.inputs.version }}-android.apk
-          asset_path: ${{ github.workspace }}/repo/siyuan/app/build/*.apk
-          asset_content_type: application/vnd.android.package-archive
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Android Build Result" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f output/*.apk ]; then
+            echo "✅ APK built and uploaded: ${{ env.UPSTREAM_TAG }}" >> $GITHUB_STEP_SUMMARY
+            ls -lh output/*.apk >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Build failed — check logs above" >> $GITHUB_STEP_SUMMARY
+          fi
