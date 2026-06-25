@@ -4,14 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version/tag (e.g. v3.5.8)"
-        required: true
+        description: "Override upstream version (e.g. 3.6.6). Defaults to VERSION file."
+        required: false
       packageManager:
-        description: "pnpm version (e.g. pnpm@10.30.1)"
-        required: true
+        description: "pnpm version (e.g. pnpm@10.30.1). Defaults to upstream package.json."
+        required: false
 
 env:
-  repo_owner: EightDoor
+  repo_owner: aatumaykin
   repo_name: unlock-siyuan
 
 jobs:
@@ -26,18 +26,39 @@ jobs:
         with:
           path: repo
 
+      - name: Read version
+        id: version
+        working-directory: ${{ github.workspace }}/repo
+        run: |
+          # ponytail: VERSION file is the single source of truth; input overrides upstream part only.
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            OVR="${{ github.event.inputs.version }}"
+            OVR="${OVR#v}"
+            sed -i "s/^UPSTREAM_VERSION=.*/UPSTREAM_VERSION=${OVR}/" VERSION
+          fi
+          source VERSION
+          echo "upstream_v=v${UPSTREAM_VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${UPSTREAM_VERSION}-${PATCH_REVISION}" >> $GITHUB_OUTPUT
+
       - name: Clone upstream and apply patches
+        id: clone
         run: |
           cd ${{ github.workspace }}/repo
           
-          git clone --branch ${{ github.event.inputs.version }} --depth=1 https://github.com/siyuan-note/siyuan.git
+          git clone --branch ${{ steps.version.outputs.upstream_v }} --depth=1 https://github.com/siyuan-note/siyuan.git
           cd siyuan
           
-          git apply ${{ github.workspace }}/repo/patches/siyuan/disable-update.patch
-          git apply ${{ github.workspace }}/repo/patches/siyuan/default-config.patch
-          git apply ${{ github.workspace }}/repo/patches/siyuan/mock-vip-user.patch
+          for patch in ${{ github.workspace }}/repo/.patches/*.patch; do
+            git apply "$patch"
+            echo "✓ applied $(basename "$patch")"
+          done
           
           git status
+          if [ -z "${{ github.event.inputs.packageManager }}" ]; then
+            echo "pnpm=$(node -e 'console.log(require("./app/package.json").packageManager)' 2>/dev/null || echo pnpm@10)" >> $GITHUB_OUTPUT
+          else
+            echo "pnpm=${{ github.event.inputs.packageManager }}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -51,7 +72,7 @@ jobs:
           node-version: 20
 
       - name: Install pnpm
-        run: npm install -g ${{ github.event.inputs.packageManager }}
+        run: npm install -g ${{ steps.clone.outputs.pnpm }}
 
       - name: Install Node Dependencies
         run: pnpm install --no-frozen-lockfile
@@ -85,7 +106,7 @@ jobs:
         id: get_release
         uses: joutvhu/get-release@v1
         with:
-          tag_name: ${{ github.event.inputs.version }}
+          tag_name: ${{ steps.version.outputs.tag }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -96,6 +117,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_name: siyuan-${{ github.event.inputs.version }}-ios.ipa
+          asset_name: siyuan-${{ steps.version.outputs.tag }}-ios.ipa
           asset_path: ${{ github.workspace }}/repo/siyuan/app/build/*.ipa
           asset_content_type: application/octet-stream

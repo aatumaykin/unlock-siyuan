@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version/tag (e.g. v3.5.8)"
-        required: true
+        description: "Override upstream version (e.g. 3.6.6). Defaults to VERSION file."
+        required: false
 
 env:
   DOCKER_USERNAME: 851708184
@@ -32,21 +32,20 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          path: repo
 
-      - name: Clone upstream and apply patches
+      - name: Read version
+        id: version
         run: |
-          cd ${{ github.workspace }}/repo
-          
-          git clone --branch ${{ github.event.inputs.version }} --depth=1 https://github.com/siyuan-note/siyuan.git
-          cd siyuan
-          
-          git apply ${{ github.workspace }}/repo/patches/siyuan/disable-update.patch
-          git apply ${{ github.workspace }}/repo/patches/siyuan/default-config.patch
-          git apply ${{ github.workspace }}/repo/patches/siyuan/mock-vip-user.patch
-          
-          git status
+          # ponytail: VERSION file is the single source of truth; input overrides upstream part only.
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            OVR="${{ github.event.inputs.version }}"
+            OVR="${OVR#v}"
+            sed -i "s/^UPSTREAM_VERSION=.*/UPSTREAM_VERSION=${OVR}/" VERSION
+            echo "overrode upstream to ${OVR}"
+          fi
+          source VERSION
+          echo "upstream=${UPSTREAM_VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${UPSTREAM_VERSION}-${PATCH_REVISION}" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -67,23 +66,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version
-        id: version
-        run: |
-          VERSION="${{ github.event.inputs.version }}"
-          VERSION="${VERSION#v}"
-          echo "value=${VERSION}" >> $GITHUB_OUTPUT
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ${{ github.workspace }}/repo/siyuan
+          context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.value }}
+            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }}
+            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.upstream }}
             ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-            ghcr.io/eightdoor/unlock-siyuan:${{ steps.version.outputs.value }}
-            ghcr.io/eightdoor/unlock-siyuan:latest
+            ghcr.io/aatumaykin/unlock-siyuan:${{ steps.version.outputs.tag }}
+            ghcr.io/aatumaykin/unlock-siyuan:${{ steps.version.outputs.upstream }}
+            ghcr.io/aatumaykin/unlock-siyuan:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

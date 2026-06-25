@@ -5,21 +5,18 @@ name: Release Android
 #   + mobile UI → app.zip
 #   + siyuan-android (gradle) → assembleOfficialRelease → .apk
 #
-# Manual trigger only: set the upstream tag (e.g. v3.6.5) and pnpm version.
+# Manual trigger only. Version defaults to VERSION file; override upstream via input.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Upstream siyuan tag (e.g. v3.6.5)"
-        required: true
-        default: "v3.6.5"
+        description: "Override upstream version (e.g. 3.6.6). Defaults to VERSION file."
+        required: false
       packageManager:
-        description: "pnpm version (e.g. pnpm@10.33.0)"
-        required: true
-        default: "pnpm@10.33.0"
+        description: "pnpm version (e.g. pnpm@10.33.0). Defaults to upstream package.json."
+        required: false
 
 env:
-  UPSTREAM_TAG: ${{ github.event.inputs.version }}
   # NDK version required by gomobile bind — must match AGP/Go expectations.
   ANDROID_NDK_VERSION: "27.0.12077973"
 
@@ -31,28 +28,48 @@ jobs:
 
     steps:
       # ──────────────────────────────────────────────
-      # 1. Checkout unlock-siyuan (patches only)
+      # 1. Checkout unlock-siyuan (patches + VERSION)
       # ──────────────────────────────────────────────
       - name: Checkout unlock-siyuan
         uses: actions/checkout@v4
         with:
           path: unlock-siyuan
 
+      - name: Read version
+        id: version
+        working-directory: ${{ github.workspace }}/unlock-siyuan
+        run: |
+          # ponytail: VERSION file is the single source of truth; input overrides upstream part only.
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            OVR="${{ github.event.inputs.version }}"
+            OVR="${OVR#v}"
+            sed -i "s/^UPSTREAM_VERSION=.*/UPSTREAM_VERSION=${OVR}/" VERSION
+          fi
+          source VERSION
+          echo "upstream_v=v${UPSTREAM_VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${UPSTREAM_VERSION}-${PATCH_REVISION}" >> $GITHUB_OUTPUT
+
       # ──────────────────────────────────────────────
       # 2. Clone upstream siyuan + apply patches
       # ──────────────────────────────────────────────
       - name: Clone upstream siyuan
         run: |
-          git clone --branch ${{ env.UPSTREAM_TAG }} --depth=1 https://github.com/siyuan-note/siyuan.git siyuan
+          git clone --branch ${{ steps.version.outputs.upstream_v }} --depth=1 https://github.com/siyuan-note/siyuan.git siyuan
           echo "SiYuan version: $(jq -r .version siyuan/app/package.json)"
 
       - name: Apply patches
+        id: clone
         working-directory: ${{ github.workspace }}/siyuan
         run: |
           for patch in ${{ github.workspace }}/unlock-siyuan/.patches/*.patch; do
-            echo "Applying $(basename $patch)..."
-            git apply "$patch" && echo "✓ $(basename $patch)" || echo "⚠ skip $(basename $patch) (may not apply)"
+            git apply "$patch"
+            echo "✓ applied $(basename "$patch")"
           done
+          if [ -z "${{ github.event.inputs.packageManager }}" ]; then
+            echo "pnpm=$(node -e 'console.log(require("./app/package.json").packageManager)' 2>/dev/null || echo pnpm@10)" >> $GITHUB_OUTPUT
+          else
+            echo "pnpm=${{ github.event.inputs.packageManager }}" >> $GITHUB_OUTPUT
+          fi
 
       # ──────────────────────────────────────────────
       # 3. Toolchain: Go, Node+pnpm, Java 21, Android SDK+NDK
@@ -68,7 +85,7 @@ jobs:
           node-version: 20
 
       - name: Install pnpm
-        run: npm install -g ${{ github.event.inputs.packageManager }}
+        run: npm install -g ${{ steps.clone.outputs.pnpm }}
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -166,7 +183,7 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p output
-          find siyuan-android/app/build/outputs/apk -name "*.apk" -exec cp {} output/siyuan-${{ env.UPSTREAM_TAG }}-android.apk \;
+          find siyuan-android/app/build/outputs/apk -name "*.apk" -exec cp {} output/siyuan-${{ steps.version.outputs.tag }}-android.apk \;
           ls -lh output/
 
       # ──────────────────────────────────────────────
@@ -176,8 +193,8 @@ jobs:
         id: release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.UPSTREAM_TAG }}
-          name: ${{ env.UPSTREAM_TAG }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           files: output/*.apk
           draft: false
           prerelease: false
@@ -190,7 +207,7 @@ jobs:
           echo "## Android Build Result" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ -f output/*.apk ]; then
-            echo "✅ APK built and uploaded: ${{ env.UPSTREAM_TAG }}" >> $GITHUB_STEP_SUMMARY
+            echo "✅ APK built and uploaded: ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
             ls -lh output/*.apk >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Build failed — check logs above" >> $GITHUB_STEP_SUMMARY
