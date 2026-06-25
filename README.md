@@ -1,174 +1,136 @@
 # 🔓 SiYuan Unlock Edition
 
-> 基于 [siyuan-note/siyuan](https://github.com/siyuan-note/siyuan) 的定制版本
+> Кастомная сборка на базе [siyuan-note/siyuan](https://github.com/siyuan-note/siyuan)
 
-## ✨ 定制内容
+## ✨ Что изменено
 
-| 功能 | 说明 |
-|------|------|
-| **VIP 解锁** | 默认解锁所有 VIP 功能（云端同步、S3/WebDAV 等） |
-| **关闭自动更新** | 默认关闭自动下载更新安装包 |
-| **Docker 支持** | 自动构建多架构 Docker 镜像 (amd64/arm64) |
+| Функция | Описание |
+|---------|----------|
+| **Разблокировка VIP** | Все VIP-функции доступны по умолчанию (облачная синхронизация, S3/WebDAV и др.) |
+| **Отключение автообновления** | Автоматическая загрузка пакетов обновления отключена по умолчанию |
+| **Поддержка Docker** | Автоматическая сборка multi-arch Docker-образов (amd64/arm64) |
+| **Сборка Android** | Корректный pipeline: `gomobile bind` → `kernel.aar` → `.apk` |
 
-## 🐳 Docker 使用
+## 🐳 Использование Docker
 
 ```bash
-# 拉取镜像 (替换 <DOCKER_USERNAME> 为你的 Docker Hub 用户名)
-docker pull <DOCKER_USERNAME>/siyuan:latest
+# Pull образа
+docker pull ghcr.io/aatumaykin/unlock-siyuan:latest
 
-# 或从 GitHub Container Registry 拉取
-docker pull ghcr.io/eightdoor/unlock-siyuan:latest
-
-# 运行容器
+# Запуск контейнера
 docker run -d \
   -v /path/to/workspace:/siyuan/workspace \
   -p 6806:6806 \
-  <DOCKER_USERNAME>/siyuan:latest \
+  ghcr.io/aatumaykin/unlock-siyuan:latest \
   --workspace=/siyuan/workspace \
   --accessAuthCode=your_password
 ```
 
-## 📥 下载
+## 📥 Скачать
 
-- [GitHub Releases](https://github.com/EightDoor/unlock-siyuan/releases)
-- [Docker Hub](https://hub.docker.com/r/<DOCKER_USERNAME>/siyuan)
+- [GitHub Releases](https://github.com/aatumaykin/unlock-siyuan/releases) — desktop (.dmg, .AppImage, .exe), Android (.apk), Docker
+- [GitHub Container Registry](https://github.com/aatumaykin/unlock-siyuan/pkgs/container/unlock-siyuan) — Docker-образы
 
-## 🔄 同步上游
+## 📱 Установка на Android
 
-当上游 siyuan-note/siyuan 有新版本时：
+1. Скачайте `siyuan-vX.Y.Z-android.apk` из [Releases](https://github.com/aatumaykin/unlock-siyuan/releases)
+2. Разрешите установку из неизвестных источников в настройках телефона
+3. Установите APK
+4. Для сборки конкретной версии: **Actions** → **Release Android** → **Run workflow** (укажите тег upstream, например `v3.6.5`)
+
+## 🔄 Синхронизация с upstream
+
+При появлении новой версии в `siyuan-note/siyuan`:
 
 ```bash
 ./scripts/sync-upstream.sh
 ```
 
-## ⚙️ GitHub Actions 配置
+Автоматическая проверка новых версий выполняется по cron (вт/пт) через workflow **Release Cron**.
 
-### 📍 配置位置
+## ⚙️ Настройка CI/CD (GitHub Actions)
 
-进入仓库 **Settings** → **Secrets and variables** → **Actions**
+### 📍 Где настраивать
 
-### 🔐 Secrets（必需）
+**Settings** → **Secrets and variables** → **Actions**
 
-| Secret | 说明 | 如何获取 |
-|--------|------|----------|
-| `DOCKER_USERNAME` | Docker Hub 用户名 | 你的 Docker Hub 账号用户名 |
-| `DOCKERHUB_TOKEN` | Docker Hub Access Token | [创建 Token](https://hub.docker.com/settings/security) |
+### 🔐 Secrets (обязательно для Docker)
 
-### 📝 Variables（可选）
+| Secret | Описание | Как получить |
+|--------|----------|--------------|
+| `DOCKER_USERNAME` | Логин Docker Hub | Ваш логин на [Docker Hub](https://hub.docker.com/) |
+| `DOCKERHUB_TOKEN` | Access Token Docker Hub | [Создать токен](https://hub.docker.com/settings/security) |
 
-| Variable | 说明 | 默认值 |
-|----------|------|--------|
-| `IMAGE_NAME` | Docker 镜像名称 | `siyuan` |
+> Для сборки desktop и Android secrets **не требуются** — используется встроенный `GITHUB_TOKEN`.
 
----
+### 📝 Variables (опционально)
 
-### 🔧 配置步骤
-
-#### 1. 创建 Docker Hub Token
-
-1. 登录 [Docker Hub](https://hub.docker.com/)
-2. 点击右上角头像 → **Account Settings**
-3. 左侧菜单 → **Security**
-4. 点击 **New Access Token**
-5. 设置：
-   - Name: `github-actions`
-   - Permissions: `Read, Write, Delete`
-6. 点击 **Generate** 并**复制 Token**（只显示一次）
-
-#### 2. 添加 GitHub Secrets
-
-1. 进入仓库 **Settings** → **Secrets and variables** → **Actions**
-2. 点击 **New repository secret**
-3. 添加用户名：
-   - Name: `DOCKER_USERNAME`
-   - Secret: 你的 Docker Hub 用户名
-4. 点击 **Add secret**
-5. 再次点击 **New repository secret**
-6. 添加 Token：
-   - Name: `DOCKERHUB_TOKEN`
-   - Secret: 粘贴刚才复制的 Token
-7. 点击 **Add secret**
-
-#### 3. 添加 GitHub Variable（可选）
-
-1. 在同一页面点击 **Variables** 标签
-2. 点击 **New repository variable**
-3. 填写：
-   - Name: `IMAGE_NAME`
-   - Value: `siyuan`（或其他镜像名称）
-4. 点击 **Add variable**
+| Variable | Описание | Значение по умолчанию |
+|----------|----------|----------------------|
+| `IMAGE_NAME` | Имя Docker-образа | `siyuan` |
 
 ---
 
-### 🚀 工作流说明
+### 🚀 Workflow'ы
 
-| 工作流 | 触发条件 | 功能 |
-|--------|---------|------|
-| **Build and Release** | Tag 推送 / 手动触发 | 构建 Docker 镜像 + 创建 Release |
-| **Sync Upstream** | 每7天自动 / 手动触发 | 同步上游代码 + 应用补丁 |
+| Workflow | Триггер | Что делает |
+|----------|---------|------------|
+| **Desktop Release** | Tag / вручную | Linux (.tar.gz, .AppImage), macOS (.dmg Intel+ARM), Windows (.exe) |
+| **Release Android** | Вручную | `gomobile bind` → `kernel.aar` → `.apk` |
+| **Release Docker** | Tag / вручную | Multi-arch Docker → GHCR + Docker Hub |
+| **Release Cron** | Cron (вт/пт) | Проверка новой версии upstream → автозапуск сборки |
+| **Target Branch** | PR | Направляет новые PR в ветку `dev` |
 
-### 📋 手动触发构建
+### 📋 Ручной запуск сборки
 
-1. 进入 **Actions** 页面
-2. 选择 **Build and Release**
-3. 点击 **Run workflow**
-4. 配置选项：
-
-| 选项 | 说明 | 默认值 |
-|------|------|--------|
-| `push_docker` | 推送到 Docker Hub | ✅ true |
-| `push_ghcr` | 推送到 GitHub Container Registry | ✅ true |
-| `build_platforms` | 构建平台 | linux/amd64,linux/arm64 |
-| `create_release` | 创建 GitHub Release | ✅ true |
+1. **Actions** → выбрать нужный workflow
+2. **Run workflow**
+3. Указать параметры (для Android):
+   - `version` — тег upstream (например `v3.6.5`)
+   - `packageManager` — версия pnpm (например `pnpm@10.33.0`)
 
 ---
 
-## 📁 目录结构
+## 📁 Структура репозитория
 
 ```
-├── .patches/              # 补丁文件
-│   ├── 001-vip-bypass.patch
-│   └── 002-disable-auto-update.patch
-├── scripts/               # 维护脚本
-│   ├── apply-patches.sh
-│   ├── apply-patches.ps1
-│   └── sync-upstream.sh
+├── .patches/              # Патчи к upstream
+│   ├── 001-vip-bypass.patch          # return true в IsPaidUser/IsSubscriber
+│   ├── 002-disable-auto-update.patch # DownloadInstallPkg: false
+│   └── 003-custom-update-source.patch
+├── scripts/               # Скрипты обслуживания
+│   ├── apply-patches.sh              # Применение патчей
+│   └── sync-upstream.sh              # Merge upstream + re-apply patches
 ├── .github/workflows/     # CI/CD
-│   ├── build-release.yml
-│   └── sync-upstream.yml
-├── README.md              # 本文件
-└── ...                    # SiYuan 源码
+│   ├── desktop-release.yml           # Desktop (.dmg, .AppImage, .exe)
+│   ├── release-android.yml           # Android (.apk)
+│   ├── release-docker.yml            # Docker multi-arch
+│   ├── release-cron.yml              # Автопроверка upstream
+│   └── target-branch.yml             # PR → dev
+├── README.md                          # Этот файл
+└── ...                                # Исходники SiYuan (полное дерево upstream)
 ```
 
-## ⚠️ 免责声明
+## 🔧 Архитектура сборки Android
 
-1. **AGPL-3.0 许可证**: 本项目遵循 AGPL-3.0 许可证
-2. **仅供学习研究**: 此定制版仅供个人学习研究使用
-3. **支持官方**: 如果你觉得思源笔记好用，请考虑[支持官方订阅](https://b3log.org/siyuan/en/pricing.html)
-
-## 📜 原始项目
-
-- 官网: https://b3log.org/siyuan/
-- 源码: https://github.com/siyuan-note/siyuan
-- 许可证: AGPL-3.0
-
----
-
-## 📝 配置清单
-
-```yaml
-# GitHub Secrets（必需）
-DOCKER_USERNAME: "your_docker_hub_username"
-DOCKERHUB_TOKEN: "dckr_pat_xxxxxxxxxxxx"
-
-# GitHub Variables（可选，有默认值）
-IMAGE_NAME: "siyuan"           # 默认: siyuan
+```
+upstream siyuan (tag)
+  ├─ apply patches → kernel.aar (gomobile bind ./mobile/)
+  ├─ build mobile UI → app.zip (appearance + guide + stage + changelogs)
+  └─ siyuan-android (gradle)
+       ├─ kernel.aar → app/libs/
+       ├─ app.zip    → app/src/main/assets/
+       └─ ./gradlew assembleOfficialRelease → siyuan.apk
 ```
 
-### 你需要配置：
+## ⚠️ Отказ от ответственности
 
-| 类型 | 名称 | 说明 |
-|------|------|------|
-| Secret | `DOCKER_USERNAME` | Docker Hub 用户名 |
-| Secret | `DOCKERHUB_TOKEN` | Docker Hub Access Token |
-| Variable | `IMAGE_NAME` | 镜像名称（可选，默认 siyuan） |
+1. **Лицензия AGPL-3.0**: Проект распространяется под AGPL-3.0 — исходный код открыт
+2. **Только для личного использования**: Сборка предназначена для личного изучения и использования
+3. **Поддержите автора**: Если SiYuan вам полезен — рассмотрите [официальную подписку](https://b3log.org/siyuan/en/pricing.html)
+
+## 📜 Исходный проект
+
+- Сайт: https://b3log.org/siyuan/
+- Репозиторий: https://github.com/siyuan-note/siyuan
+- Лицензия: AGPL-3.0
