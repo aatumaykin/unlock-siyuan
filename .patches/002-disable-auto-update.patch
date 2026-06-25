@@ -7,7 +7,7 @@ index d4a7d04..d2e9bdb 100644
  		KernelVersion:      util.Ver,
  		NetworkProxy:       &NetworkProxy{},
 -		DownloadInstallPkg: true,
-+		DownloadInstallPkg: false // [FORK-MOD] Disabled auto download update package,
++		DownloadInstallPkg: false, // [FORK-MOD] Disabled auto download update package
  	}
  }
  
